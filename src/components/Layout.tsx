@@ -5,6 +5,9 @@ const links = [
   { to: '/', label: 'Tagebuch', icon: '📔' },
   { to: '/weight', label: 'Gewicht', icon: '📈' },
   { to: '/recipes', label: 'Rezepte', icon: '📖' },
+  { to: '/ki-koch', label: 'KI-Koch', icon: '✨' },
+  { to: '/scan/food', label: 'Essen scannen', icon: '📷' },
+  { to: '/scan/label', label: 'Etikette scannen', icon: '🏷️' },
 ]
 
 export default function Layout() {
