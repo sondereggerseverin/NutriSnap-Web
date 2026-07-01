@@ -441,6 +441,21 @@ select {
   margin-top: 8px;
 }
 
+.photo-input {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.photo-preview {
+  max-width: 320px;
+  max-height: 320px;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  object-fit: cover;
+}
+
 @media (max-width: 720px) {
   .app-shell {
     flex-direction: column;
