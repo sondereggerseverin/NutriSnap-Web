@@ -6,6 +6,9 @@ import Login from './pages/Login'
 import Diary from './pages/Diary'
 import Weight from './pages/Weight'
 import Recipes from './pages/Recipes'
+import RecipeGenerator from './pages/RecipeGenerator'
+import FoodScan from './pages/FoodScan'
+import LabelScan from './pages/LabelScan'
 
 export default function App() {
   return (
@@ -18,6 +21,9 @@ export default function App() {
               <Route path="/" element={<Diary />} />
               <Route path="/weight" element={<Weight />} />
               <Route path="/recipes" element={<Recipes />} />
+              <Route path="/ki-koch" element={<RecipeGenerator />} />
+              <Route path="/scan/food" element={<FoodScan />} />
+              <Route path="/scan/label" element={<LabelScan />} />
             </Route>
           </Route>
         </Routes>
