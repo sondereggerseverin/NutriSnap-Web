@@ -102,12 +102,21 @@ Falls kein Rezepttitel erkennbar ist, erfinde einen passenden deutschen Namen.`
   const prompt = `Du bist ein erfahrener Ernährungsberater und Koch.
 ${taskDescription}
 
-Berechne die Nährwerte EXAKT basierend auf echten Zutatenmengen.
+${MACRO_REFERENCE}
+
+${jsonSchemaHint(4)}`
+
+  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  return JSON.parse(cleanJson(raw)) as GeneratedRecipe
+}
+
+const MACRO_REFERENCE = `Berechne die Nährwerte EXAKT basierend auf echten Zutatenmengen.
 Referenzwerte pro 100g: Hühnerbrust=165kcal/31gP, Parmesan=431kcal/38gP,
 Ricotta=174kcal/11gP, Hackfleisch=250kcal/17gP, Pasta=350kcal/13gP,
-Reis=130kcal/3gP, Ei=155kcal/13gP, Butter=717kcal/1gP.
+Reis=130kcal/3gP, Ei=155kcal/13gP, Butter=717kcal/1gP.`
 
-Antworte NUR mit folgendem JSON (kein Markdown, keine Erklärungen):
+function jsonSchemaHint(servings: number) {
+  return `Antworte NUR mit folgendem JSON (kein Markdown, keine Erklärungen):
 {
   "title": "Rezeptname",
   "description": "Kurze Beschreibung",
@@ -116,7 +125,7 @@ Antworte NUR mit folgendem JSON (kein Markdown, keine Erklärungen):
   ],
   "ingredients": ["200g Hühnerbrust"],
   "steps": ["Schritt 1", "Schritt 2"],
-  "servings": 4,
+  "servings": ${servings},
   "prepTimeMinutes": 30,
   "calories": 650,
   "protein": 55.0,
@@ -126,6 +135,83 @@ Antworte NUR mit folgendem JSON (kein Markdown, keine Erklärungen):
 
 calories/protein/carbs/fat auf Toplevel = Werte PRO PORTION.
 Werte in structuredIngredients = GESAMT für die gesamte Zutatenmenge.`
+}
+
+/** Generiert ein Rezept aus vorhandenen Zutaten (z.B. "was ist im Kühlschrank"). */
+export async function generateFromIngredients(ingredients: string[], note = ''): Promise<GeneratedRecipe> {
+  const list = ingredients.filter((i) => i.trim()).map((i) => `- ${i}`).join('\n')
+  const noteBlock = note.trim() ? `\nZusätzlicher Wunsch: ${note.trim()}` : ''
+
+  const prompt = `Du bist ein erfahrener Koch, spezialisiert auf Resteverwertung ("was kann ich mit dem kochen, das ich gerade zuhause habe").
+
+Diese Zutaten sind vorhanden:
+${list}
+${noteBlock}
+
+Erstelle ein realistisches, alltagstaugliches Rezept, das MÖGLICHST VIELE dieser Zutaten verwendet.
+Du darfst übliche Grundzutaten annehmen, die in fast jedem Haushalt vorhanden sind (Salz, Pfeffer, Öl, Wasser, Gewürze),
+auch wenn sie nicht in der Liste stehen. Falls für ein rundes Gericht 1-2 zusätzliche Zutaten fehlen, die typischerweise
+im Haushalt vorhanden sind, kannst du sie ergänzen — aber baue das Rezept primär um die vorhandenen Zutaten herum.
+Erfinde KEINE exotischen Zutaten, die die Person offensichtlich nicht hat.
+
+${MACRO_REFERENCE}
+
+${jsonSchemaHint(2)}`
+
+  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  return JSON.parse(cleanJson(raw)) as GeneratedRecipe
+}
+
+/** Generiert ein Gericht, das in die noch übrigen Tages-Makros passt ("Fill Up"). */
+export async function generateFillUp(
+  remainingCalories: number,
+  remainingProtein: number,
+  remainingCarbs: number,
+  remainingFat: number,
+  mealLabel: string
+): Promise<GeneratedRecipe> {
+  const r = (n: number) => Math.max(0, Math.round(n))
+  const prompt = `Du bist ein erfahrener Ernährungsberater und Koch. Die Person hat heute noch folgendes Kalorien-/Makro-Budget übrig
+und möchte damit ihr(e) ${mealLabel} bestreiten:
+
+- Kalorien: ca. ${r(remainingCalories)} kcal
+- Protein: ca. ${r(remainingProtein)} g
+- Kohlenhydrate: ca. ${r(remainingCarbs)} g
+- Fett: ca. ${r(remainingFat)} g
+
+Erfinde ein leckeres, alltagstaugliches Gericht, dessen Nährwerte PRO PORTION so nah wie möglich an diesem Budget liegen
+(Toleranz ca. ±10%). Bevorzuge eine ausgewogene, proteinreiche Mahlzeit. Wenn das Budget sehr klein ist (< 300 kcal),
+schlage einen Snack statt einer ganzen Mahlzeit vor. Setze "servings" auf 1, damit die Toplevel-Werte direkt einer Portion entsprechen.
+
+${MACRO_REFERENCE}
+
+${jsonSchemaHint(1)}`
+
+  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  return JSON.parse(cleanJson(raw)) as GeneratedRecipe
+}
+
+const RANDOM_CUISINES = [
+  'italienisch', 'asiatisch (wok)', 'mexikanisch', 'mediterran', 'indisch (mild)',
+  'skandinavisch', 'amerikanisch (BBQ-Style)', 'griechisch', 'orientalisch',
+  'schweizerisch/alpin', 'japanisch', 'thailändisch', 'spanisch',
+]
+const RANDOM_STYLES = [
+  'schnell (unter 20 Min.)', 'proteinreich & fitnessfreundlich', 'gemütliches Comfort Food',
+  'vegetarisch', 'One-Pot', 'für Meal Prep geeignet', 'leicht & sommerlich', 'herzhaft & deftig',
+]
+
+/** Überrascht mit einem komplett zufälligen, alltagstauglichen Rezept. */
+export async function generateRandomRecipe(): Promise<GeneratedRecipe> {
+  const cuisine = RANDOM_CUISINES[Math.floor(Math.random() * RANDOM_CUISINES.length)]
+  const style = RANDOM_STYLES[Math.floor(Math.random() * RANDOM_STYLES.length)]
+
+  const prompt = `Überrasche mich mit einem kreativen, aber alltagstauglichen Rezept. Stil: ${cuisine}, ${style}.
+Es soll mit haushaltsüblichen, in der Schweiz/Europa gut erhältlichen Zutaten machbar sein.
+
+${MACRO_REFERENCE}
+
+${jsonSchemaHint(2)}`
 
   const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
@@ -174,6 +260,29 @@ Alle Werte (calories/protein/carbs/fat) beziehen sich auf die GESAMTE geschätzt
   ]
   const raw = await chatCompletion(VISION_MODEL, content)
   return JSON.parse(cleanJson(raw)) as FoodScanResult
+}
+
+export interface FridgeScanResult {
+  ingredients: string[]
+}
+
+export async function analyzeFridgePhoto(base64Jpeg: string): Promise<FridgeScanResult> {
+  const prompt = `Du siehst ein Foto von einem Kühlschrank, Vorratsschrank oder einer Ansammlung von Lebensmitteln.
+Identifiziere ALLE klar erkennbaren Lebensmittel/Zutaten auf dem Foto. Sei konkret (z.B. "Rüebli" statt "Gemüse",
+"Naturejoghurt" statt "Milchprodukt"), aber erfinde nichts, was nicht wirklich zu sehen ist.
+Ignoriere nicht-essbare Dinge.
+
+Antworte NUR mit folgendem JSON (kein Markdown, keine Erklärungen):
+{
+  "ingredients": ["Rüebli", "Naturejoghurt", "Eier", "Zwiebeln"]
+}`
+
+  const content = [
+    { type: 'text', text: prompt },
+    { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Jpeg}` } },
+  ]
+  const raw = await chatCompletion(VISION_MODEL, content)
+  return JSON.parse(cleanJson(raw)) as FridgeScanResult
 }
 
 export async function analyzeNutritionLabel(base64Jpeg: string): Promise<NutritionLabelResult> {
