@@ -1,0 +1,98 @@
+name: Build Web App
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Type-check + build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_GROQ_API_KEY: ${{ secrets.VITE_GROQ_API_KEY }}
+        run: npm run build 2>&1 | tee build_output.log; exit ${PIPESTATUS[0]}
+      - name: Upload errors to repo
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_NUM: ${{ github.run_number }}
+        run: |
+          python3 - <<'PYEOF'
+          import urllib.request, json, base64, os
+
+          token = os.environ['GH_TOKEN']
+          repo = os.environ['REPO']
+          run_num = os.environ['RUN_NUM']
+
+          with open('build_output.log', 'r', errors='replace') as f:
+              lines = f.readlines()
+
+          error_lines = [l for l in lines if any(k in l for k in [
+              'error TS', 'error:', 'Error:', 'Cannot find', 'cannot find',
+              'is not assignable', 'FAILED', 'Module not found',
+              'is not defined', 'Property', 'Type error'
+          ])]
+
+          content = (
+              f"# Build errors - run {run_num}\n\n"
+              "## Error lines\n```\n" +
+              "".join(error_lines[-80:]) +
+              "```\n\n## Last 150 lines\n```\n" +
+              "".join(lines[-150:]) +
+              "```\n"
+          )
+
+          encoded = base64.b64encode(content.encode()).decode()
+
+          api_url = f"https://api.github.com/repos/{repo}/contents/build_errors.txt"
+          req = urllib.request.Request(api_url, headers={"Authorization": f"token {token}"})
+          try:
+              existing = json.load(urllib.request.urlopen(req))
+              file_sha = existing['sha']
+          except:
+              file_sha = None
+
+          payload = {"message": f"ci: errors run {run_num}", "content": encoded}
+          if file_sha:
+              payload["sha"] = file_sha
+
+          put_req = urllib.request.Request(
+              api_url,
+              data=json.dumps(payload).encode(),
+              headers={"Authorization": f"token {token}", "Content-Type": "application/json"},
+              method="PUT"
+          )
+          resp = json.load(urllib.request.urlopen(put_req))
+          print("Committed:", resp.get('commit', {}).get('sha', 'unknown')[:12])
+          PYEOF
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build_output.log
+          retention-days: 14
+      - name: Upload dist
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NutriSnap-Web-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
