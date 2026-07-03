@@ -32,15 +32,21 @@ export default function Diary() {
   const [mealType, setMealType] = useState<MealType>('LUNCH')
   const [saving, setSaving] = useState(false)
 
-  // Adaptive-Kalorienziel: braucht Gewichts- + Tagebuch-Historie der letzten Tage.
+  // Adaptive-Kalorienziel: braucht Gewichts- + Tagebuch-Historie der letzten Tage,
+  // plus optional Aktivkalorien (health_daily, von Android gepusht) fuer den Sport-Bonus.
   const [weightByDate, setWeightByDate] = useState<Record<string, number>>({})
   const [intakeByDate, setIntakeByDate] = useState<Record<string, number>>({})
+  const [activeKcalByDate, setActiveKcalByDate] = useState<Record<string, number>>({})
 
   const loadTrendData = useCallback(async () => {
     if (!session) return
     const cutoff = toDateStr(new Date(Date.now() - TREND_WINDOW_DAYS * 86400000))
 
-    const [{ data: weightRows, error: weightErr }, { data: diaryRows, error: diaryErr }] = await Promise.all([
+    const [
+      { data: weightRows, error: weightErr },
+      { data: diaryRows, error: diaryErr },
+      { data: healthRows, error: healthErr },
+    ] = await Promise.all([
       supabase
         .from('weight_entries')
         .select('date_str, weight_kg')
@@ -49,6 +55,11 @@ export default function Diary() {
       supabase
         .from('diary_entries')
         .select('date_str, calories')
+        .eq('user_id', session.user.id)
+        .gte('date_str', cutoff),
+      supabase
+        .from('health_daily')
+        .select('date_str, active_calories_kcal')
         .eq('user_id', session.user.id)
         .gte('date_str', cutoff),
     ])
@@ -65,6 +76,15 @@ export default function Diary() {
       }
       setIntakeByDate(map)
     }
+    // health_daily existiert evtl. noch nicht (Tabelle muss einmalig in Supabase
+    // angelegt werden) -- Fehler hier sind nicht kritisch, Sport-Bonus faellt dann weg.
+    if (!healthErr && healthRows) {
+      const map: Record<string, number> = {}
+      for (const r of healthRows as { date_str: string; active_calories_kcal: number | null }[]) {
+        if (r.active_calories_kcal != null) map[r.date_str] = r.active_calories_kcal
+      }
+      setActiveKcalByDate(map)
+    }
   }, [session])
 
   useEffect(() => {
@@ -73,8 +93,13 @@ export default function Diary() {
 
   const adaptiveTarget = useMemo(() => {
     const trendTdee = computeTrendTdee(weightByDate, intakeByDate)
-    return computeDailyTarget(trendTdee)
-  }, [weightByDate, intakeByDate])
+    const todayStr = toDateStr(new Date())
+    const activeDays = Object.keys(activeKcalByDate).filter((d) => d !== todayStr).sort()
+    const last7 = activeDays.slice(-7)
+    const avgActiveKcal = last7.length > 0 ? last7.reduce((a, d) => a + activeKcalByDate[d], 0) / last7.length : null
+    const todayActiveKcal = activeKcalByDate[todayStr] ?? null
+    return computeDailyTarget(trendTdee, todayActiveKcal, avgActiveKcal)
+  }, [weightByDate, intakeByDate, activeKcalByDate])
 
   const load = useCallback(async () => {
     if (!session) return
@@ -198,8 +223,11 @@ export default function Diary() {
       {adaptiveTarget ? (
         <p className="empty-state" style={{ textAlign: 'left', margin: '0 0 16px' }}>
           Trend-TDEE aus Gewichts- &amp; Tagebuchverlauf: {adaptiveTarget.baseKcal + adaptiveTarget.deficitKcal} kcal
-          Erhaltung − {adaptiveTarget.deficitKcal} kcal Defizit = {adaptiveTarget.targetKcal} kcal Ziel. (Sport-Bonus
-          ist auf dem Web noch nicht verfügbar, da Aktivkalorien nicht synchronisiert werden.)
+          Erhaltung − {adaptiveTarget.deficitKcal} kcal Defizit
+          {adaptiveTarget.activityBonusKcal !== 0
+            ? ` ${adaptiveTarget.activityBonusKcal > 0 ? '+' : '−'} ${Math.abs(adaptiveTarget.activityBonusKcal)} kcal Sport-Bonus`
+            : ''}{' '}
+          = {adaptiveTarget.targetKcal} kcal Ziel.
         </p>
       ) : (
         <p className="empty-state" style={{ textAlign: 'left', margin: '0 0 16px' }}>
