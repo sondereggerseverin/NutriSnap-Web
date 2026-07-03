@@ -2,6 +2,9 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { DiaryEntryRow, MEAL_TYPES, MEAL_TYPE_LABELS, MealType } from '../lib/types'
+import { computeDailyTarget, computeTrendTdee, MIN_TREND_DAYS } from '../lib/adaptiveTdee'
+
+const TREND_WINDOW_DAYS = 30
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -28,6 +31,50 @@ export default function Diary() {
   const [fat, setFat] = useState('')
   const [mealType, setMealType] = useState<MealType>('LUNCH')
   const [saving, setSaving] = useState(false)
+
+  // Adaptive-Kalorienziel: braucht Gewichts- + Tagebuch-Historie der letzten Tage.
+  const [weightByDate, setWeightByDate] = useState<Record<string, number>>({})
+  const [intakeByDate, setIntakeByDate] = useState<Record<string, number>>({})
+
+  const loadTrendData = useCallback(async () => {
+    if (!session) return
+    const cutoff = toDateStr(new Date(Date.now() - TREND_WINDOW_DAYS * 86400000))
+
+    const [{ data: weightRows, error: weightErr }, { data: diaryRows, error: diaryErr }] = await Promise.all([
+      supabase
+        .from('weight_entries')
+        .select('date_str, weight_kg')
+        .eq('user_id', session.user.id)
+        .gte('date_str', cutoff),
+      supabase
+        .from('diary_entries')
+        .select('date_str, calories')
+        .eq('user_id', session.user.id)
+        .gte('date_str', cutoff),
+    ])
+
+    if (!weightErr && weightRows) {
+      const map: Record<string, number> = {}
+      for (const r of weightRows as { date_str: string; weight_kg: number }[]) map[r.date_str] = r.weight_kg
+      setWeightByDate(map)
+    }
+    if (!diaryErr && diaryRows) {
+      const map: Record<string, number> = {}
+      for (const r of diaryRows as { date_str: string; calories: number }[]) {
+        map[r.date_str] = (map[r.date_str] ?? 0) + r.calories
+      }
+      setIntakeByDate(map)
+    }
+  }, [session])
+
+  useEffect(() => {
+    loadTrendData()
+  }, [loadTrendData])
+
+  const adaptiveTarget = useMemo(() => {
+    const trendTdee = computeTrendTdee(weightByDate, intakeByDate)
+    return computeDailyTarget(trendTdee)
+  }, [weightByDate, intakeByDate])
 
   const load = useCallback(async () => {
     if (!session) return
@@ -143,7 +190,23 @@ export default function Diary() {
           <div className="label">Fett</div>
           <div className="value">{Math.round(totals.fat)}g</div>
         </div>
+        <div className="stat-card">
+          <div className="label">Adaptives Ziel</div>
+          <div className="value">{adaptiveTarget ? `${adaptiveTarget.targetKcal}` : '–'}</div>
+        </div>
       </div>
+      {adaptiveTarget ? (
+        <p className="empty-state" style={{ textAlign: 'left', margin: '0 0 16px' }}>
+          Trend-TDEE aus Gewichts- &amp; Tagebuchverlauf: {adaptiveTarget.baseKcal + adaptiveTarget.deficitKcal} kcal
+          Erhaltung − {adaptiveTarget.deficitKcal} kcal Defizit = {adaptiveTarget.targetKcal} kcal Ziel. (Sport-Bonus
+          ist auf dem Web noch nicht verfügbar, da Aktivkalorien nicht synchronisiert werden.)
+        </p>
+      ) : (
+        <p className="empty-state" style={{ textAlign: 'left', margin: '0 0 16px' }}>
+          Adaptives Ziel: noch nicht genug Daten (mind. {MIN_TREND_DAYS} Tage mit Gewicht &amp; Tagebuch-Einträgen
+          nötig).
+        </p>
+      )}
 
       <div className="card">
         <h3 style={{ marginBottom: 14 }}>Eintrag hinzufügen</h3>
