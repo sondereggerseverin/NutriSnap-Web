@@ -53,3 +53,11 @@ export interface RecipeRow {
   saved_at: number
   local_id: number | null
 }
+
+// Spiegelt HealthDailyDto aus SupabaseSync.kt (Android pusht, Web liest nur)
+export interface HealthDailyRow {
+  user_id: string
+  date_str: string
+  active_calories_kcal: number | null
+  steps: number | null
+}
