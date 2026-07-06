@@ -61,3 +61,18 @@ export interface HealthDailyRow {
   active_calories_kcal: number | null
   steps: number | null
 }
+
+// Spiegelt UserProfileDto aus SupabaseSync.kt (1 Zeile pro Nutzer)
+export interface UserProfileRow {
+  user_id: string
+  weight_kg: number
+  height_cm: number
+  age_years: number
+  daily_calorie_goal: number
+  protein_goal_g: number
+  carbs_goal_g: number
+  fat_goal_g: number
+  activity_factor: number
+  sex: 'MALE' | 'FEMALE' | 'UNSPECIFIED'
+  updated_at: number
+}
