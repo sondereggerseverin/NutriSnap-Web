@@ -9,6 +9,7 @@ import Recipes from './pages/Recipes'
 import RecipeGenerator from './pages/RecipeGenerator'
 import FoodScan from './pages/FoodScan'
 import LabelScan from './pages/LabelScan'
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
               <Route path="/ki-koch" element={<RecipeGenerator />} />
               <Route path="/scan/food" element={<FoodScan />} />
               <Route path="/scan/label" element={<LabelScan />} />
+              <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>
         </Routes>
