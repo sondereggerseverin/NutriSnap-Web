@@ -1,0 +1,15 @@
+# Build errors - run 4
+
+## Error lines
+```
+src/App.tsx(12,22): error TS2307: Cannot find module './pages/Settings' or its corresponding type declarations.
+```
+
+## Last 150 lines
+```
+
+> nutrisnap-web@0.1.0 build
+> tsc -b && vite build
+
+src/App.tsx(12,22): error TS2307: Cannot find module './pages/Settings' or its corresponding type declarations.
+```
