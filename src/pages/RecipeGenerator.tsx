@@ -12,10 +12,10 @@ import {
   GeneratedRecipe,
 } from '../lib/groq'
 import PhotoInput from '../components/PhotoInput'
+import { addRecipeToDiary } from '../lib/diary'
+import { MEAL_TYPES, MEAL_TYPE_LABELS, MealType, UserProfileRow } from '../lib/types'
 
 type Mode = 'freitext' | 'zutaten' | 'fillup' | 'zufall'
-
-const CALORIE_GOAL_KEY = 'nutrisnap_calorie_goal'
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -30,6 +30,9 @@ export default function RecipeGenerator() {
   const [error, setError] = useState<string | null>(null)
   const [recipe, setRecipe] = useState<GeneratedRecipe | null>(null)
   const [saving, setSaving] = useState(false)
+  const [resultMealType, setResultMealType] = useState<MealType>('LUNCH')
+  const [addingToDiary, setAddingToDiary] = useState(false)
+  const [addedToDiary, setAddedToDiary] = useState(false)
 
   // Freitext
   const [input, setInput] = useState('')
@@ -39,36 +42,52 @@ export default function RecipeGenerator() {
   const [ingredientInput, setIngredientInput] = useState('')
   const [scanningFridge, setScanningFridge] = useState(false)
 
-  // Fill Up
-  const [calorieGoal, setCalorieGoal] = useState<number>(() => {
-    const stored = localStorage.getItem(CALORIE_GOAL_KEY)
-    return stored ? Number(stored) : 2000
-  })
-  const [eatenToday, setEatenToday] = useState(0)
-  const [mealLabel, setMealLabel] = useState('Abendessen')
-
-  useEffect(() => {
-    localStorage.setItem(CALORIE_GOAL_KEY, String(calorieGoal))
-  }, [calorieGoal])
+  // Fill Up — Ziele kommen aus dem synchronisierten user_profiles (wie in der App),
+  // statt aus einem lokalen, unsynchronisierten Browser-Wert.
+  const [profile, setProfile] = useState<UserProfileRow | null>(null)
+  const [eatenToday, setEatenToday] = useState({ kcal: 0, protein: 0, carbs: 0, fat: 0 })
+  const [mealLabel, setMealLabel] = useState<MealType>('DINNER')
 
   useEffect(() => {
     if (!session || mode !== 'fillup') return
     supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => setProfile(data as UserProfileRow | null))
+    supabase
       .from('diary_entries')
-      .select('calories')
+      .select('calories, protein, carbs, fat')
       .eq('user_id', session.user.id)
       .eq('date_str', toDateStr(new Date()))
       .then(({ data }) => {
-        const sum = (data ?? []).reduce((acc, e: { calories: number }) => acc + e.calories, 0)
-        setEatenToday(sum)
+        const rows = (data ?? []) as { calories: number; protein: number; carbs: number; fat: number }[]
+        setEatenToday(
+          rows.reduce(
+            (acc, e) => ({
+              kcal: acc.kcal + e.calories,
+              protein: acc.protein + e.protein,
+              carbs: acc.carbs + e.carbs,
+              fat: acc.fat + e.fat,
+            }),
+            { kcal: 0, protein: 0, carbs: 0, fat: 0 }
+          )
+        )
       })
   }, [session, mode])
 
-  const remainingCalories = Math.max(0, calorieGoal - eatenToday)
-  // Ohne Profil-Ziele auf dem Web nehmen wir ausgewogene Richtwerte relativ zum Kalorienrest an.
-  const remainingProtein = Math.round((remainingCalories * 0.3) / 4)
-  const remainingCarbs = Math.round((remainingCalories * 0.4) / 4)
-  const remainingFat = Math.round((remainingCalories * 0.3) / 9)
+  const calorieGoal = profile?.daily_calorie_goal ?? 2000
+  const remainingCalories = Math.max(0, calorieGoal - eatenToday.kcal)
+  const remainingProtein = profile
+    ? Math.max(0, Math.round(profile.protein_goal_g - eatenToday.protein))
+    : Math.round((remainingCalories * 0.3) / 4)
+  const remainingCarbs = profile
+    ? Math.max(0, Math.round(profile.carbs_goal_g - eatenToday.carbs))
+    : Math.round((remainingCalories * 0.4) / 4)
+  const remainingFat = profile
+    ? Math.max(0, Math.round(profile.fat_goal_g - eatenToday.fat))
+    : Math.round((remainingCalories * 0.3) / 9)
 
   function addChip() {
     const trimmed = ingredientInput.trim()
@@ -107,6 +126,7 @@ export default function RecipeGenerator() {
     setLoading(true)
     setError(null)
     setRecipe(null)
+    setAddedToDiary(false)
     try {
       const r = await fn()
       setRecipe(r)
@@ -144,6 +164,24 @@ export default function RecipeGenerator() {
     setSaving(false)
     if (error) setError(error.message)
     else navigate('/recipes')
+  }
+
+  async function handleAddResultToDiary() {
+    if (!session || !recipe) return
+    setAddingToDiary(true)
+    setAddedToDiary(false)
+    const { error } = await addRecipeToDiary({
+      userId: session.user.id,
+      title: recipe.title,
+      calories: recipe.calories,
+      protein: recipe.protein,
+      carbs: recipe.carbs,
+      fat: recipe.fat,
+      mealType: resultMealType,
+    })
+    setAddingToDiary(false)
+    if (error) setError(error.message)
+    else setAddedToDiary(true)
   }
 
   const tabs: { id: Mode; label: string }[] = [
@@ -270,18 +308,10 @@ export default function RecipeGenerator() {
 
         {mode === 'fillup' && (
           <div>
-            <div className="field" style={{ marginBottom: 12 }}>
-              <label htmlFor="goal">Tagesziel (kcal)</label>
-              <input
-                id="goal"
-                type="number"
-                value={calorieGoal}
-                onChange={(e) => setCalorieGoal(Number(e.target.value) || 0)}
-              />
-              <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 4 }}>
-                Wird lokal in diesem Browser gespeichert (kein synchronisiertes Profil auf dem Web).
-              </p>
-            </div>
+            <p style={{ fontSize: 12, color: 'var(--ink-muted)', marginBottom: 12 }}>
+              Tagesziel ({calorieGoal} kcal) kommt aus deinem synchronisierten Profil.{' '}
+              {!profile && <a href="/settings">Jetzt in den Einstellungen festlegen</a>}
+            </p>
 
             <div className="stat-row" style={{ marginBottom: 16 }}>
               <div className="stat-card">
@@ -292,10 +322,12 @@ export default function RecipeGenerator() {
 
             <div className="field" style={{ marginBottom: 12 }}>
               <label htmlFor="meal">Für welche Mahlzeit?</label>
-              <select id="meal" value={mealLabel} onChange={(e) => setMealLabel(e.target.value)}>
-                <option value="Mittagessen">Mittagessen</option>
-                <option value="Abendessen">Abendessen</option>
-                <option value="Snack">Snack</option>
+              <select id="meal" value={mealLabel} onChange={(e) => setMealLabel(e.target.value as MealType)}>
+                {MEAL_TYPES.map((m) => (
+                  <option key={m} value={m}>
+                    {MEAL_TYPE_LABELS[m]}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -303,7 +335,9 @@ export default function RecipeGenerator() {
               className="btn"
               disabled={loading || remainingCalories <= 0}
               onClick={() =>
-                runGenerate(() => generateFillUp(remainingCalories, remainingProtein, remainingCarbs, remainingFat, mealLabel))
+                runGenerate(() =>
+                  generateFillUp(remainingCalories, remainingProtein, remainingCarbs, remainingFat, MEAL_TYPE_LABELS[mealLabel])
+                )
               }
             >
               {loading ? 'Fülle auf…' : 'Mit Restbudget auffüllen'}
@@ -370,9 +404,33 @@ export default function RecipeGenerator() {
             ))}
           </ol>
 
-          <button className="btn" onClick={handleSave} disabled={saving} style={{ marginTop: 12 }}>
-            {saving ? 'Speichert…' : 'Rezept speichern'}
-          </button>
+          <div className="form-row" style={{ marginTop: 12, alignItems: 'flex-end' }}>
+            <button className="btn" onClick={handleSave} disabled={saving}>
+              {saving ? 'Speichert…' : 'Rezept speichern'}
+            </button>
+            <div className="field">
+              <label htmlFor="result-meal">Mahlzeit</label>
+              <select
+                id="result-meal"
+                value={resultMealType}
+                onChange={(e) => setResultMealType(e.target.value as MealType)}
+              >
+                {MEAL_TYPES.map((m) => (
+                  <option key={m} value={m}>
+                    {MEAL_TYPE_LABELS[m]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button className="btn-ghost btn" onClick={handleAddResultToDiary} disabled={addingToDiary || !session}>
+              {addingToDiary ? 'Fügt hinzu…' : 'Zum Tagebuch hinzufügen'}
+            </button>
+          </div>
+          {addedToDiary && (
+            <span style={{ color: 'var(--accent)', display: 'inline-block', marginTop: 8 }}>
+              Zum Tagebuch hinzugefügt ✓
+            </span>
+          )}
         </div>
       )}
     </div>

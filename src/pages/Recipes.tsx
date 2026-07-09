@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { RecipeRow } from '../lib/types'
+import { MEAL_TYPES, MEAL_TYPE_LABELS, MealType, RecipeRow } from '../lib/types'
+import { addRecipeToDiary } from '../lib/diary'
 
 export default function Recipes() {
   const { session } = useAuth()
@@ -44,7 +45,7 @@ export default function Recipes() {
           <p className="empty-state">Noch keine Rezepte gespeichert.</p>
         </div>
       ) : openRecipe ? (
-        <RecipeDetail recipe={openRecipe} onBack={() => setOpenRecipe(null)} />
+        <RecipeDetail recipe={openRecipe} onBack={() => setOpenRecipe(null)} userId={session?.user.id} />
       ) : (
         <div className="recipe-grid">
           {recipes.map((r) => (
@@ -65,7 +66,40 @@ export default function Recipes() {
   )
 }
 
-function RecipeDetail({ recipe, onBack }: { recipe: RecipeRow; onBack: () => void }) {
+function RecipeDetail({
+  recipe,
+  onBack,
+  userId,
+}: {
+  recipe: RecipeRow
+  onBack: () => void
+  userId: string | undefined
+}) {
+  const [servings, setServings] = useState(1)
+  const [mealType, setMealType] = useState<MealType>('LUNCH')
+  const [adding, setAdding] = useState(false)
+  const [added, setAdded] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+
+  async function handleAddToDiary() {
+    if (!userId) return
+    setAdding(true)
+    setAdded(false)
+    setAddError(null)
+    const { error } = await addRecipeToDiary({
+      userId,
+      title: recipe.title,
+      calories: (recipe.total_calories ?? 0) * servings,
+      protein: (recipe.protein_per_serving ?? 0) * servings,
+      carbs: (recipe.carbs_per_serving ?? 0) * servings,
+      fat: (recipe.fat_per_serving ?? 0) * servings,
+      mealType,
+    })
+    setAdding(false)
+    if (error) setAddError(error.message)
+    else setAdded(true)
+  }
+
   return (
     <div className="card">
       <button className="btn-ghost btn" style={{ marginBottom: 16 }} onClick={onBack}>
@@ -91,6 +125,38 @@ function RecipeDetail({ recipe, onBack }: { recipe: RecipeRow; onBack: () => voi
           <div className="label">Fett</div>
           <div className="value">{recipe.fat_per_serving ? Math.round(recipe.fat_per_serving) : '–'}</div>
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 20, background: 'var(--bg-elevated)' }}>
+        <h3 style={{ marginBottom: 14 }}>Zum Tagebuch hinzufügen</h3>
+        <div className="form-row">
+          <div className="field">
+            <label htmlFor="rd-servings">Portionen</label>
+            <input
+              id="rd-servings"
+              type="number"
+              step="0.5"
+              min="0.5"
+              value={servings}
+              onChange={(e) => setServings(Number(e.target.value) || 1)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="rd-meal">Mahlzeit</label>
+            <select id="rd-meal" value={mealType} onChange={(e) => setMealType(e.target.value as MealType)}>
+              {MEAL_TYPES.map((m) => (
+                <option key={m} value={m}>
+                  {MEAL_TYPE_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button className="btn" type="button" onClick={handleAddToDiary} disabled={adding || !userId}>
+            {adding ? 'Fügt hinzu…' : 'Hinzufügen'}
+          </button>
+        </div>
+        {added && <span style={{ color: 'var(--accent)' }}>Zum Tagebuch hinzugefügt ✓</span>}
+        {addError && <p className="error-text">{addError}</p>}
       </div>
 
       {recipe.ingredients && (
