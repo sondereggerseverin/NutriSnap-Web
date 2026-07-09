@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { MEAL_TYPES, MEAL_TYPE_LABELS, MealType, RecipeRow } from '../lib/types'
 import { addRecipeToDiary } from '../lib/diary'
+import { addRecipeIngredients } from '../lib/shoppingList'
 
 export default function Recipes() {
   const { session } = useAuth()
@@ -80,6 +81,13 @@ function RecipeDetail({
   const [adding, setAdding] = useState(false)
   const [added, setAdded] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  const [addedToShoppingList, setAddedToShoppingList] = useState(false)
+
+  function handleAddToShoppingList() {
+    if (!recipe.ingredients) return
+    addRecipeIngredients(recipe.title, recipe.ingredients.split('\n'))
+    setAddedToShoppingList(true)
+  }
 
   async function handleAddToDiary() {
     if (!userId) return
@@ -161,7 +169,13 @@ function RecipeDetail({
 
       {recipe.ingredients && (
         <>
-          <h3 style={{ marginTop: 24 }}>Zutaten</h3>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 24 }}>
+            <h3>Zutaten</h3>
+            <button className="btn-ghost btn" type="button" onClick={handleAddToShoppingList}>
+              🛒 Zur Einkaufsliste
+            </button>
+          </div>
+          {addedToShoppingList && <span style={{ color: 'var(--accent)' }}>Zur Einkaufsliste hinzugefügt ✓</span>}
           <div style={{ whiteSpace: 'pre-wrap', fontSize: 14.5, lineHeight: 1.6 }}>{recipe.ingredients}</div>
         </>
       )}

@@ -13,6 +13,7 @@ import {
 } from '../lib/groq'
 import PhotoInput from '../components/PhotoInput'
 import { addRecipeToDiary } from '../lib/diary'
+import { addRecipeIngredients } from '../lib/shoppingList'
 import { MEAL_TYPES, MEAL_TYPE_LABELS, MealType, UserProfileRow } from '../lib/types'
 
 type Mode = 'freitext' | 'zutaten' | 'fillup' | 'zufall'
@@ -33,6 +34,7 @@ export default function RecipeGenerator() {
   const [resultMealType, setResultMealType] = useState<MealType>('LUNCH')
   const [addingToDiary, setAddingToDiary] = useState(false)
   const [addedToDiary, setAddedToDiary] = useState(false)
+  const [addedToShoppingList, setAddedToShoppingList] = useState(false)
 
   // Freitext
   const [input, setInput] = useState('')
@@ -127,6 +129,7 @@ export default function RecipeGenerator() {
     setError(null)
     setRecipe(null)
     setAddedToDiary(false)
+    setAddedToShoppingList(false)
     try {
       const r = await fn()
       setRecipe(r)
@@ -390,7 +393,20 @@ export default function RecipeGenerator() {
             {recipe.servings} Portionen · {recipe.prepTimeMinutes} Min. Zubereitung
           </p>
 
-          <h3 style={{ marginTop: 24 }}>Zutaten</h3>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 24 }}>
+            <h3>Zutaten</h3>
+            <button
+              className="btn-ghost btn"
+              type="button"
+              onClick={() => {
+                addRecipeIngredients(recipe.title, recipe.ingredients)
+                setAddedToShoppingList(true)
+              }}
+            >
+              🛒 Zur Einkaufsliste
+            </button>
+          </div>
+          {addedToShoppingList && <span style={{ color: 'var(--accent)' }}>Zur Einkaufsliste hinzugefügt ✓</span>}
           <ul style={{ paddingLeft: 20, lineHeight: 1.7 }}>
             {recipe.ingredients.map((ing, i) => (
               <li key={i}>{ing}</li>
