@@ -1,10 +1,24 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { DiaryEntryRow, MEAL_TYPES, MEAL_TYPE_LABELS, MealType } from '../lib/types'
+import { DiaryEntryRow, MEAL_TYPES, MEAL_TYPE_LABELS, MealType, UserProfileRow } from '../lib/types'
 import { computeDailyTarget, computeTrendTdee, MIN_TREND_DAYS } from '../lib/adaptiveTdee'
 
 const TREND_WINDOW_DAYS = 30
+
+// Icon/Farbe je Mahlzeit — identisch zu HomeViewModel.kt (Android MealOverview).
+const MEAL_META: Record<MealType, { icon: string; color: string }> = {
+  BREAKFAST: { icon: '☀️', color: '#FF9B45' },
+  LUNCH: { icon: '🌤️', color: '#4B8BF5' },
+  DINNER: { icon: '🌙', color: '#A259FF' },
+  SNACK: { icon: '🍎', color: '#2D7D46' },
+}
+
+function greetingForHour(h: number) {
+  if (h < 11) return 'Guten Morgen'
+  if (h < 18) return 'Guten Tag'
+  return 'Guten Abend'
+}
 
 function toDateStr(d: Date) {
   return d.toISOString().slice(0, 10)
@@ -38,6 +52,17 @@ export default function Diary() {
   const [intakeByDate, setIntakeByDate] = useState<Record<string, number>>({})
   const [activeKcalByDate, setActiveKcalByDate] = useState<Record<string, number>>({})
   const [stepsByDate, setStepsByDate] = useState<Record<string, number>>({})
+  const [profile, setProfile] = useState<UserProfileRow | null>(null)
+
+  useEffect(() => {
+    if (!session) return
+    supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .maybeSingle()
+      .then(({ data }) => setProfile(data as UserProfileRow | null))
+  }, [session])
 
   const loadTrendData = useCallback(async () => {
     if (!session) return
@@ -154,6 +179,30 @@ export default function Diary() {
     return map
   }, [entries])
 
+  const mealOverview = useMemo(
+    () =>
+      MEAL_TYPES.map((mt) => ({
+        type: mt,
+        label: MEAL_TYPE_LABELS[mt],
+        ...MEAL_META[mt],
+        kcal: grouped[mt].reduce((sum, e) => sum + e.calories, 0),
+        count: grouped[mt].length,
+      })),
+    [grouped]
+  )
+
+  const burnedKcal = activeKcalByDate[dateStr] ?? 0
+  const calorieGoal = profile?.daily_calorie_goal ?? 2000
+  const proteinGoal = profile?.protein_goal_g ?? 120
+  const carbsGoal = profile?.carbs_goal_g ?? 220
+  const fatGoal = profile?.fat_goal_g ?? 65
+  // Wenn adaptives Ziel verfügbar ist, ist der Aktivitätsbonus schon eingerechnet
+  // (siehe adjustedGoal in Android HomeUiState) — sonst wird burnedKcal separat addiert.
+  const adjustedGoal = adaptiveTarget ? adaptiveTarget.targetKcal : calorieGoal + burnedKcal
+  const remaining = Math.max(0, adjustedGoal - totals.kcal)
+  const ringPct = Math.min(1, adjustedGoal > 0 ? totals.kcal / adjustedGoal : 0)
+  const greeting = useMemo(() => greetingForHour(new Date().getHours()), [])
+
   async function handleAdd(e: FormEvent) {
     e.preventDefault()
     if (!session || !name.trim()) return
@@ -193,6 +242,12 @@ export default function Diary() {
     const d = new Date(dateStr + 'T00:00:00')
     d.setDate(d.getDate() + days)
     setDateStr(toDateStr(d))
+  }
+
+  function quickAdd(mt: MealType) {
+    setMealType(mt)
+    document.getElementById('add-form-name')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    document.getElementById('add-form-name')?.focus()
   }
 
   return (
@@ -245,28 +300,126 @@ export default function Diary() {
         )}
       </div>
 
-      <div className="stat-row">
-        <div className="stat-card">
-          <div className="label">Kalorien</div>
-          <div className="value">{Math.round(totals.kcal)}</div>
+      <div className="dashboard-header">
+        <div className="dashboard-top">
+          <div>
+            <div className="dashboard-greeting">{greeting} 👋</div>
+            <div className="dashboard-title">Dein Tag im Überblick</div>
+            {adaptiveTarget && (
+              <div className="dashboard-adaptive">🎯 Adaptives Ziel</div>
+            )}
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="label">Protein</div>
-          <div className="value">{Math.round(totals.protein)}g</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Kohlenhydrate</div>
-          <div className="value">{Math.round(totals.carbs)}g</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Fett</div>
-          <div className="value">{Math.round(totals.fat)}g</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Adaptives Ziel</div>
-          <div className="value">{adaptiveTarget ? `${adaptiveTarget.targetKcal}` : '–'}</div>
+
+        <div className="dashboard-ring-row">
+          <div className="ring-wrap">
+            <svg viewBox="0 0 120 120" width="110" height="110">
+              <circle cx="60" cy="60" r="51" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="9" />
+              <circle
+                cx="60"
+                cy="60"
+                r="51"
+                fill="none"
+                stroke={ringPct > 1 ? '#FFD67A' : '#ffffff'}
+                strokeWidth="9"
+                strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 51}
+                strokeDashoffset={2 * Math.PI * 51 * (1 - Math.min(ringPct, 1))}
+                transform="rotate(-90 60 60)"
+              />
+            </svg>
+            <div className="ring-center">
+              <span className="ring-value">{Math.round(remaining)}</span>
+              <span className="ring-label">kcal übrig</span>
+            </div>
+          </div>
+
+          <div className="dashboard-stats">
+            <div className="dashboard-labeled-values">
+              <div className="labeled-value">
+                <span className="lv-value">{Math.round(totals.kcal)}</span>
+                <span className="lv-label">gegessen</span>
+              </div>
+              {burnedKcal > 0 && (
+                <div className="labeled-value">
+                  <span className="lv-value">+{Math.round(burnedKcal)}</span>
+                  <span className="lv-label">aktiv</span>
+                </div>
+              )}
+              <div className="labeled-value">
+                <span className="lv-value">{Math.round(adjustedGoal)}</span>
+                <span className="lv-label">Ziel</span>
+              </div>
+            </div>
+            <div className="macro-bar-white">
+              <div className="macro-bar-head">
+                <span>Protein</span>
+                <span>{Math.round(totals.protein)}g</span>
+              </div>
+              <div className="macro-bar-track">
+                <div
+                  className="macro-bar-fill"
+                  style={{ width: `${Math.min(100, (totals.protein / Math.max(1, proteinGoal)) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div className="macro-bar-white">
+              <div className="macro-bar-head">
+                <span>Kohlenh.</span>
+                <span>{Math.round(totals.carbs)}g</span>
+              </div>
+              <div className="macro-bar-track">
+                <div
+                  className="macro-bar-fill"
+                  style={{ width: `${Math.min(100, (totals.carbs / Math.max(1, carbsGoal)) * 100)}%` }}
+                />
+              </div>
+            </div>
+            <div className="macro-bar-white">
+              <div className="macro-bar-head">
+                <span>Fett</span>
+                <span>{Math.round(totals.fat)}g</span>
+              </div>
+              <div className="macro-bar-track">
+                <div
+                  className="macro-bar-fill"
+                  style={{ width: `${Math.min(100, (totals.fat / Math.max(1, fatGoal)) * 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+
+      <div className="meal-grid">
+        {mealOverview.map((meal) => (
+          <div key={meal.type} className="meal-card">
+            <button type="button" className="meal-card-body" onClick={() => quickAdd(meal.type)}>
+              <div className="meal-card-head">
+                <span className="meal-card-icon" style={{ background: `${meal.color}26` }}>
+                  {meal.icon}
+                </span>
+                <span className="meal-card-label">{meal.label}</span>
+              </div>
+              <div className="meal-card-kcal" style={{ color: meal.count > 0 ? 'var(--accent)' : 'var(--ink-muted)' }}>
+                {Math.round(meal.kcal)} kcal
+              </div>
+              <div className="meal-card-count">{meal.count} Einträge</div>
+            </button>
+            <button
+              type="button"
+              className="meal-card-add"
+              style={{ background: meal.color }}
+              aria-label={`Zu ${meal.label} hinzufügen`}
+              onClick={() => quickAdd(meal.type)}
+            >
+              +
+            </button>
+          </div>
+        ))}
+      </div>
+
+
       {adaptiveTarget ? (
         <p className="empty-state" style={{ textAlign: 'left', margin: '0 0 16px' }}>
           Trend-TDEE aus Gewichts- &amp; Tagebuchverlauf: {adaptiveTarget.baseKcal + adaptiveTarget.deficitKcal} kcal
@@ -288,8 +441,8 @@ export default function Diary() {
         <form onSubmit={handleAdd}>
           <div className="form-row">
             <div className="field" style={{ minWidth: 180 }}>
-              <label htmlFor="name">Bezeichnung</label>
-              <input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+              <label htmlFor="add-form-name">Bezeichnung</label>
+              <input id="add-form-name" value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
             <div className="field">
               <label htmlFor="grams">Menge (g)</label>
