@@ -191,6 +191,36 @@ ${jsonSchemaHint(1)}`
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
+/**
+ * Extrahiert ein Rezept aus bereits abgerufenem Seiteninhalt (Webseite, Instagram/TikTok-Caption).
+ * Analog zu RecipeAiParser.parse() in der Android-App: der Inhalt wurde bereits gescraped,
+ * hier übernimmt die KI nur noch die Extraktion (keine Erfindung von Zutaten).
+ */
+export async function parseRecipeFromScrapedContent(
+  content: string,
+  sourceUrl: string,
+  platform: string
+): Promise<GeneratedRecipe> {
+  const truncated = content.slice(0, 6000)
+  const prompt = `Du bist ein erfahrener Ernährungsberater und Koch. Folgender Inhalt wurde von einer Webseite/einem Social-Media-Post extrahiert (Quelle: ${sourceUrl}, Plattform: ${platform}):
+
+"""
+${truncated}
+"""
+
+Der Inhalt kann Navigations-Reste, Werbung oder andere irrelevante Textfragmente enthalten — ignoriere diese.
+Extrahiere daraus das eigentliche Rezept: Titel, Zutaten (mit Mengenangaben) und Zubereitungsschritte.
+Falls Mengenangaben fehlen, schätze realistische Werte. Falls kein Rezepttitel erkennbar ist, erfinde einen passenden deutschen Namen.
+Falls im Inhalt KEIN Rezept erkennbar ist, tu trotzdem dein Bestes, ein plausibles Rezept aus den vorhandenen Hinweisen (z.B. Gerichtname) zu erstellen.
+
+${MACRO_REFERENCE}
+
+${jsonSchemaHint(4)}`
+
+  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  return JSON.parse(cleanJson(raw)) as GeneratedRecipe
+}
+
 const RANDOM_CUISINES = [
   'italienisch', 'asiatisch (wok)', 'mexikanisch', 'mediterran', 'indisch (mild)',
   'skandinavisch', 'amerikanisch (BBQ-Style)', 'griechisch', 'orientalisch',

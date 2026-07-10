@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { MEAL_TYPES, MEAL_TYPE_LABELS, MealType, RecipeRow } from '../lib/types'
 import { addRecipeToDiary } from '../lib/diary'
 import { addRecipeIngredients } from '../lib/shoppingList'
+import { importRecipesFromUrls, BatchImportItem } from '../lib/recipeImport'
 
 export default function Recipes() {
   const { session } = useAuth()
@@ -11,6 +12,7 @@ export default function Recipes() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [openRecipe, setOpenRecipe] = useState<RecipeRow | null>(null)
+  const [showImport, setShowImport] = useState(false)
 
   const load = useCallback(async () => {
     if (!session) return
@@ -32,10 +34,19 @@ export default function Recipes() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1>Rezepte</h1>
-        <p>Alle in der App gespeicherten Rezepte.</p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <h1>Rezepte</h1>
+          <p>Alle in der App gespeicherten Rezepte.</p>
+        </div>
+        <button className="btn-ghost btn" type="button" onClick={() => setShowImport((v) => !v)}>
+          {showImport ? '✕ Schliessen' : '🔗 Von Link importieren'}
+        </button>
       </div>
+
+      {showImport && session && (
+        <LinkImportPanel userId={session.user.id} onImported={load} onClose={() => setShowImport(false)} />
+      )}
 
       {error && <p className="error-text">{error}</p>}
 
@@ -58,6 +69,87 @@ export default function Recipes() {
                   {r.total_calories ? `${Math.round(r.total_calories)} kcal` : ''}
                   {r.prep_time_minutes ? ` · ${r.prep_time_minutes} min` : ''}
                 </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function LinkImportPanel({
+  userId,
+  onImported,
+  onClose,
+}: {
+  userId: string
+  onImported: () => void
+  onClose: () => void
+}) {
+  const [text, setText] = useState('')
+  const [items, setItems] = useState<BatchImportItem[]>([])
+  const [running, setRunning] = useState(false)
+
+  const urls = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('http://') || l.startsWith('https://'))
+
+  async function handleImport() {
+    if (urls.length === 0 || running) return
+    setRunning(true)
+    await importRecipesFromUrls(urls, userId, setItems)
+    setRunning(false)
+    onImported()
+  }
+
+  const allDone = items.length > 0 && items.every((i) => i.status === 'done' || i.status === 'error')
+
+  const statusIcon: Record<BatchImportItem['status'], string> = {
+    pending: '⏳',
+    running: '🔄',
+    done: '✅',
+    error: '⚠️',
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 20, background: 'var(--bg-elevated)' }}>
+      <h3 style={{ marginBottom: 6 }}>Rezept(e) von Link importieren</h3>
+      <p style={{ color: 'var(--ink-muted)', fontSize: 14, marginBottom: 12 }}>
+        Ein Link pro Zeile — funktioniert mit Rezept-Webseiten, Instagram- und TikTok-Posts. Der Inhalt wird abgerufen
+        und per KI zu einem Rezept extrahiert und direkt gespeichert.
+      </p>
+      <textarea
+        rows={4}
+        placeholder={'https://example.com/rezept\nhttps://www.instagram.com/p/...'}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={running}
+        style={{ width: '100%', fontFamily: 'inherit', fontSize: 14, resize: 'vertical' }}
+      />
+      <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center' }}>
+        <button className="btn" type="button" onClick={handleImport} disabled={running || urls.length === 0}>
+          {running ? 'Importiert…' : urls.length > 1 ? `${urls.length} Links importieren` : 'Importieren'}
+        </button>
+        {allDone && (
+          <button className="btn-ghost btn" type="button" onClick={onClose}>
+            Fertig
+          </button>
+        )}
+      </div>
+
+      {items.length > 0 && (
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {items.map((item) => (
+            <div key={item.url} style={{ fontSize: 14, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <span>{statusIcon[item.status]}</span>
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ color: 'var(--ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {item.url}
+                </div>
+                {item.status === 'done' && item.resultTitle && <div>Gespeichert: {item.resultTitle}</div>}
+                {item.status === 'error' && <div className="error-text">{item.error}</div>}
               </div>
             </div>
           ))}
