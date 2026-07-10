@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
 import { UserProfileRow } from '../lib/types'
 
 const SEXES: { value: UserProfileRow['sex']; label: string }[] = [
@@ -25,6 +26,7 @@ const DEFAULT_PROFILE: Omit<UserProfileRow, 'user_id'> = {
 
 export default function Settings() {
   const { session } = useAuth()
+  const { theme, themes, setTheme } = useTheme()
   const [profile, setProfile] = useState<UserProfileRow | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -86,6 +88,39 @@ export default function Settings() {
       <div className="page-header">
         <h1>Einstellungen</h1>
         <p>Profil &amp; Ziele, synchronisiert mit der App.</p>
+      </div>
+
+      <div className="card">
+        <h3 style={{ marginBottom: 14 }}>App-Design</h3>
+        <div className="theme-grid">
+          {themes.map((t) => {
+            const isSelected = t.id === theme.id
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={'theme-card' + (isSelected ? ' selected' : '')}
+                style={isSelected ? { borderColor: t.primary, background: t.primaryLight } : undefined}
+                onClick={() => setTheme(t.id)}
+              >
+                <span className="theme-swatch" style={{ background: t.primary }}>
+                  {t.emoji}
+                </span>
+                <span
+                  className="theme-label"
+                  style={isSelected ? { color: t.primaryDark, fontWeight: 700 } : undefined}
+                >
+                  {t.label.split(' ')[0]}
+                </span>
+                {isSelected && (
+                  <span className="theme-check" style={{ color: t.primary }}>
+                    ✓
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       <div className="card">
