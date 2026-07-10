@@ -37,6 +37,7 @@ export default function Diary() {
   const [weightByDate, setWeightByDate] = useState<Record<string, number>>({})
   const [intakeByDate, setIntakeByDate] = useState<Record<string, number>>({})
   const [activeKcalByDate, setActiveKcalByDate] = useState<Record<string, number>>({})
+  const [stepsByDate, setStepsByDate] = useState<Record<string, number>>({})
 
   const loadTrendData = useCallback(async () => {
     if (!session) return
@@ -59,7 +60,7 @@ export default function Diary() {
         .gte('date_str', cutoff),
       supabase
         .from('health_daily')
-        .select('date_str, active_calories_kcal')
+        .select('date_str, active_calories_kcal, steps, weight_kg')
         .eq('user_id', session.user.id)
         .gte('date_str', cutoff),
     ])
@@ -67,7 +68,7 @@ export default function Diary() {
     if (!weightErr && weightRows) {
       const map: Record<string, number> = {}
       for (const r of weightRows as { date_str: string; weight_kg: number }[]) map[r.date_str] = r.weight_kg
-      setWeightByDate(map)
+      setWeightByDate((prev) => ({ ...prev, ...map }))
     }
     if (!diaryErr && diaryRows) {
       const map: Record<string, number> = {}
@@ -79,11 +80,24 @@ export default function Diary() {
     // health_daily existiert evtl. noch nicht (Tabelle muss einmalig in Supabase
     // angelegt werden) -- Fehler hier sind nicht kritisch, Sport-Bonus faellt dann weg.
     if (!healthErr && healthRows) {
-      const map: Record<string, number> = {}
-      for (const r of healthRows as { date_str: string; active_calories_kcal: number | null }[]) {
-        if (r.active_calories_kcal != null) map[r.date_str] = r.active_calories_kcal
+      const kcalMap: Record<string, number> = {}
+      const stepsMap: Record<string, number> = {}
+      const weightFallback: Record<string, number> = {}
+      for (const r of healthRows as {
+        date_str: string
+        active_calories_kcal: number | null
+        steps: number | null
+        weight_kg: number | null
+      }[]) {
+        if (r.active_calories_kcal != null) kcalMap[r.date_str] = r.active_calories_kcal
+        if (r.steps != null) stepsMap[r.date_str] = r.steps
+        if (r.weight_kg != null) weightFallback[r.date_str] = r.weight_kg
       }
-      setActiveKcalByDate(map)
+      setActiveKcalByDate(kcalMap)
+      setStepsByDate(stepsMap)
+      // weight_entries hat Vorrang; health_daily.weight_kg dient nur als Fallback
+      // (z.B. wenn nur Health Connect, aber noch kein manueller Eintrag existiert).
+      setWeightByDate((prev) => ({ ...weightFallback, ...prev }))
     }
   }, [session])
 
@@ -196,6 +210,39 @@ export default function Diary() {
         <button onClick={() => shiftDate(1)} aria-label="Nächster Tag">
           ›
         </button>
+      </div>
+
+      <div className="card health-card">
+        <h3 style={{ marginBottom: 14 }}>Health</h3>
+        {stepsByDate[dateStr] == null && activeKcalByDate[dateStr] == null && weightByDate[dateStr] == null ? (
+          <p className="empty-state" style={{ textAlign: 'left', margin: 0 }}>
+            Noch keine Health-Daten für diesen Tag (Sync über die Android-App mit Health Connect).
+          </p>
+        ) : (
+          <div className="health-stat-row">
+            <div className="health-stat">
+              <span className="health-icon">👟</span>
+              <span className="health-value">
+                {stepsByDate[dateStr] != null ? stepsByDate[dateStr].toLocaleString('de-CH') : '–'}
+              </span>
+              <span className="health-label">Schritte</span>
+            </div>
+            <div className="health-stat">
+              <span className="health-icon">🔥</span>
+              <span className="health-value">
+                {activeKcalByDate[dateStr] != null ? `${Math.round(activeKcalByDate[dateStr])} kcal` : '–'}
+              </span>
+              <span className="health-label">Verbrannt</span>
+            </div>
+            <div className="health-stat">
+              <span className="health-icon">⚖️</span>
+              <span className="health-value">
+                {weightByDate[dateStr] != null ? `${weightByDate[dateStr].toFixed(1)} kg` : '–'}
+              </span>
+              <span className="health-label">Gewicht</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="stat-row">
