@@ -1,8 +1,9 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { DiaryEntryRow, MEAL_TYPES, MEAL_TYPE_LABELS, MealType, UserProfileRow } from '../lib/types'
 import { computeDailyTarget, computeTrendTdee, MIN_TREND_DAYS } from '../lib/adaptiveTdee'
+import { lookupBarcode, ProductResult, searchProducts } from '../lib/productSearch'
 
 const TREND_WINDOW_DAYS = 30
 
@@ -45,6 +46,126 @@ export default function Diary() {
   const [fat, setFat] = useState('')
   const [mealType, setMealType] = useState<MealType>('LUNCH')
   const [saving, setSaving] = useState(false)
+
+  // Produktsuche (Open Food Facts) — Web-Pendant zur Datenbanksuche/Barcode-Scan in der App.
+  const [selectedProduct, setSelectedProduct] = useState<ProductResult | null>(null)
+  const [productQuery, setProductQuery] = useState('')
+  const [productResults, setProductResults] = useState<ProductResult[]>([])
+  const [productSearching, setProductSearching] = useState(false)
+  const [productError, setProductError] = useState<string | null>(null)
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [scannerError, setScannerError] = useState<string | null>(null)
+  const [manualBarcode, setManualBarcode] = useState('')
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+
+  function applyProduct(p: ProductResult, grams_: number) {
+    setSelectedProduct(p)
+    setName(p.brand ? `${p.name} (${p.brand})` : p.name)
+    setGrams(String(grams_))
+    const factor = grams_ / 100
+    setKcal(String(Math.round(p.kcal * factor)))
+    setProtein(String(Math.round(p.protein * factor * 10) / 10))
+    setCarbs(String(Math.round(p.carbs * factor * 10) / 10))
+    setFat(String(Math.round(p.fat * factor * 10) / 10))
+    setProductResults([])
+    setProductQuery('')
+  }
+
+  // Solange ein Produkt ausgewählt ist, Naehrwerte automatisch auf die eingegebene
+  // Menge umrechnen (statt dass der Nutzer sie manuell nachrechnen muss).
+  function handleGramsChange(value: string) {
+    setGrams(value)
+    if (selectedProduct) {
+      const factor = (Number(value) || 0) / 100
+      setKcal(String(Math.round(selectedProduct.kcal * factor)))
+      setProtein(String(Math.round(selectedProduct.protein * factor * 10) / 10))
+      setCarbs(String(Math.round(selectedProduct.carbs * factor * 10) / 10))
+      setFat(String(Math.round(selectedProduct.fat * factor * 10) / 10))
+    }
+  }
+
+  async function runProductSearch(q: string) {
+    setProductQuery(q)
+    setSelectedProduct(null)
+    if (q.trim().length < 2) {
+      setProductResults([])
+      return
+    }
+    setProductSearching(true)
+    setProductError(null)
+    try {
+      const results = await searchProducts(q.trim())
+      setProductResults(results)
+    } catch {
+      setProductError('Suche fehlgeschlagen. Bitte später erneut versuchen.')
+    } finally {
+      setProductSearching(false)
+    }
+  }
+
+  async function handleBarcodeLookup(code: string) {
+    if (!code.trim()) return
+    setProductSearching(true)
+    setProductError(null)
+    try {
+      const product = await lookupBarcode(code.trim())
+      if (product) {
+        applyProduct(product, 100)
+        closeScanner()
+      } else {
+        setProductError(`Kein Produkt mit Barcode ${code} gefunden.`)
+      }
+    } catch {
+      setProductError('Abfrage fehlgeschlagen. Bitte später erneut versuchen.')
+    } finally {
+      setProductSearching(false)
+    }
+  }
+
+  function closeScanner() {
+    setScannerOpen(false)
+    setScannerError(null)
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+  }
+
+  async function openScanner() {
+    setScannerOpen(true)
+    setScannerError(null)
+    const BarcodeDetectorCtor = (window as typeof window & { BarcodeDetector?: new (opts: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<{ rawValue: string }[]> } }).BarcodeDetector
+    if (!BarcodeDetectorCtor) {
+      setScannerError('Barcode-Scan wird von diesem Browser nicht unterstützt. Bitte Barcode manuell eingeben.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        await videoRef.current.play()
+      }
+      const detector = new BarcodeDetectorCtor({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] })
+      const scanLoop = async () => {
+        if (!streamRef.current || !videoRef.current) return
+        try {
+          const codes = await detector.detect(videoRef.current)
+          if (codes.length > 0) {
+            await handleBarcodeLookup(codes[0].rawValue)
+            return
+          }
+        } catch {
+          // einzelner Frame fehlgeschlagen — Schleife trotzdem fortsetzen
+        }
+        if (streamRef.current) requestAnimationFrame(scanLoop)
+      }
+      requestAnimationFrame(scanLoop)
+    } catch {
+      setScannerError('Kamerazugriff nicht möglich. Bitte Berechtigung erteilen oder Barcode manuell eingeben.')
+    }
+  }
+
+  useEffect(() => () => closeScanner(), [])
 
   // Adaptive-Kalorienziel: braucht Gewichts- + Tagebuch-Historie der letzten Tage,
   // plus optional Aktivkalorien (health_daily, von Android gepusht) fuer den Sport-Bonus.
@@ -224,6 +345,7 @@ export default function Diary() {
       return
     }
     setName('')
+    setSelectedProduct(null)
     setGrams('100')
     setKcal('')
     setProtein('')
@@ -437,7 +559,90 @@ export default function Diary() {
       )}
 
       <div className="card">
+        <h3 style={{ marginBottom: 14 }}>Produkt suchen</h3>
+        <div className="product-search-row">
+          <input
+            type="text"
+            placeholder="z.B. Nutella, Quark, Banane…"
+            value={productQuery}
+            onChange={(e) => runProductSearch(e.target.value)}
+          />
+          <button type="button" className="btn btn-ghost" onClick={openScanner}>
+            📷 Barcode
+          </button>
+        </div>
+        {productSearching && <p className="empty-state" style={{ textAlign: 'left', margin: '8px 0 0' }}>Suche…</p>}
+        {productError && <p className="error-text">{productError}</p>}
+        {productResults.length > 0 && (
+          <div className="product-results">
+            {productResults.map((p, i) => (
+              <button
+                type="button"
+                key={`${p.barcode ?? p.name}-${i}`}
+                className="product-result-row"
+                onClick={() => applyProduct(p, 100)}
+              >
+                {p.imageUrl ? (
+                  <img src={p.imageUrl} alt="" className="product-result-img" />
+                ) : (
+                  <span className="product-result-img product-result-img-placeholder">🍽️</span>
+                )}
+                <span className="product-result-main">
+                  <span className="product-result-name">{p.name}</span>
+                  {p.brand && <span className="product-result-brand">{p.brand}</span>}
+                </span>
+                <span className="product-result-kcal">{Math.round(p.kcal)} kcal/100g</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {scannerOpen && (
+          <div className="scanner-overlay" onClick={closeScanner}>
+            <div className="scanner-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="scanner-head">
+                <span>Barcode scannen</span>
+                <button type="button" className="scanner-close" onClick={closeScanner} aria-label="Schliessen">
+                  ✕
+                </button>
+              </div>
+              {scannerError ? (
+                <p className="error-text">{scannerError}</p>
+              ) : (
+                <video ref={videoRef} className="scanner-video" muted playsInline />
+              )}
+              <div className="scanner-manual">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Barcode manuell eingeben"
+                  value={manualBarcode}
+                  onChange={(e) => setManualBarcode(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => handleBarcodeLookup(manualBarcode)}
+                  disabled={productSearching}
+                >
+                  Suchen
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
         <h3 style={{ marginBottom: 14 }}>Eintrag hinzufügen</h3>
+        {selectedProduct && (
+          <div className="product-linked-badge">
+            🔗 Verknüpft mit „{selectedProduct.name}" — Menge ändert Nährwerte automatisch.{' '}
+            <button type="button" className="link-btn" onClick={() => setSelectedProduct(null)}>
+              lösen
+            </button>
+          </div>
+        )}
         <form onSubmit={handleAdd}>
           <div className="form-row">
             <div className="field" style={{ minWidth: 180 }}>
@@ -446,7 +651,7 @@ export default function Diary() {
             </div>
             <div className="field">
               <label htmlFor="grams">Menge (g)</label>
-              <input id="grams" type="number" value={grams} onChange={(e) => setGrams(e.target.value)} />
+              <input id="grams" type="number" value={grams} onChange={(e) => handleGramsChange(e.target.value)} />
             </div>
             <div className="field">
               <label htmlFor="kcal">Kalorien</label>
