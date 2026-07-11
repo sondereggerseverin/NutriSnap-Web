@@ -11,6 +11,7 @@ import FoodScan from './pages/FoodScan'
 import LabelScan from './pages/LabelScan'
 import Settings from './pages/Settings'
 import ShoppingList from './pages/ShoppingList'
+import MealTemplates from './pages/MealTemplates'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
               <Route path="/scan/food" element={<FoodScan />} />
               <Route path="/scan/label" element={<LabelScan />} />
               <Route path="/shopping-list" element={<ShoppingList />} />
+              <Route path="/meal-templates" element={<MealTemplates />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Route>

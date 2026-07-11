@@ -9,6 +9,7 @@ const links = [
   { to: '/scan/food', label: 'Essen scannen', icon: '📷' },
   { to: '/scan/label', label: 'Etikette scannen', icon: '🏷️' },
   { to: '/shopping-list', label: 'Einkaufsliste', icon: '🛒' },
+  { to: '/meal-templates', label: 'Mahlzeit-Vorlagen', icon: '🍽️' },
   { to: '/settings', label: 'Einstellungen', icon: '⚙️' },
 ]
 
