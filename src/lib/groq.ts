@@ -60,13 +60,15 @@ async function chatCompletion(model: string, content: unknown, jsonMode = true):
   if (!GROQ_API_KEY) {
     throw new Error('Kein VITE_GROQ_API_KEY konfiguriert (Vercel Environment Variables).')
   }
+  const isVision = model === VISION_MODEL
   const body: Record<string, unknown> = {
     model,
-    temperature: model.includes('scout') ? 0.3 : 0.7,
+    temperature: isVision ? 0.3 : 0.7,
+    reasoning_effort: isVision ? 'none' : 'low',
     messages: [{ role: 'user', content }],
   }
   if (jsonMode) body.response_format = { type: 'json_object' }
-  body[model.includes('scout') ? 'max_completion_tokens' : 'max_tokens'] = model.includes('scout') ? 1000 : 2000
+  body[isVision ? 'max_completion_tokens' : 'max_tokens'] = isVision ? 1000 : 2000
 
   const res = await fetch(CHAT_URL, {
     method: 'POST',
@@ -106,7 +108,7 @@ ${MACRO_REFERENCE}
 
 ${jsonSchemaHint(4)}`
 
-  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  const raw = await chatCompletion('openai/gpt-oss-120b', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
@@ -158,7 +160,7 @@ ${MACRO_REFERENCE}
 
 ${jsonSchemaHint(2)}`
 
-  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  const raw = await chatCompletion('openai/gpt-oss-120b', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
@@ -187,7 +189,7 @@ ${MACRO_REFERENCE}
 
 ${jsonSchemaHint(1)}`
 
-  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  const raw = await chatCompletion('openai/gpt-oss-120b', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
@@ -217,7 +219,7 @@ ${MACRO_REFERENCE}
 
 ${jsonSchemaHint(4)}`
 
-  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  const raw = await chatCompletion('openai/gpt-oss-120b', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
@@ -243,11 +245,11 @@ ${MACRO_REFERENCE}
 
 ${jsonSchemaHint(2)}`
 
-  const raw = await chatCompletion('llama-3.3-70b-versatile', prompt)
+  const raw = await chatCompletion('openai/gpt-oss-120b', prompt)
   return JSON.parse(cleanJson(raw)) as GeneratedRecipe
 }
 
-const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+const VISION_MODEL = 'qwen/qwen3.6-27b'
 
 /** Skaliert + komprimiert ein Bild und gibt Base64 (ohne data:-Prefix) zurück. */
 export async function fileToBase64Jpeg(file: File, maxDim = 1024, quality = 0.75): Promise<string> {
